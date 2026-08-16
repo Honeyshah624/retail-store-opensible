@@ -1,0 +1,186 @@
+---
+- name: Deploy Retail Store application to Amazon EKS
+  hosts: local
+  connection: local
+  gather_facts: false
+
+  vars:
+    aws_region: ap-south-1
+    eks_cluster_name: retail-store-dev-eks
+    namespace: default
+    app_dir: /workspace/opensible/retail-store-sample-app/src/app
+
+  tasks:
+
+    - name: Verify AWS credentials
+      ansible.builtin.command:
+        argv:
+          - aws
+          - sts
+          - get-caller-identity
+      register: aws_identity
+      changed_when: false
+
+    - name: Show AWS identity
+      ansible.builtin.debug:
+        var: aws_identity.stdout
+
+
+    - name: Configure kubeconfig for EKS
+      ansible.builtin.command:
+        argv:
+          - aws
+          - eks
+          - update-kubeconfig
+          - --region
+          - "{{ aws_region }}"
+          - --name
+          - "{{ eks_cluster_name }}"
+      register: kubeconfig_result
+      changed_when: true
+
+
+    - name: Verify EKS cluster connectivity
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - get
+          - nodes
+          - -o
+          - wide
+      register: nodes
+      changed_when: false
+
+    - name: Show EKS nodes
+      ansible.builtin.debug:
+        var: nodes.stdout_lines
+
+
+    - name: Verify Helmfile
+      ansible.builtin.command:
+        argv:
+          - helmfile
+          - --version
+      register: helmfile_version
+      changed_when: false
+
+
+    - name: Verify application directory
+      ansible.builtin.stat:
+        path: "{{ app_dir }}/helmfile.yaml"
+      register: helmfile_path
+
+    - name: Fail when Helmfile does not exist
+      ansible.builtin.fail:
+        msg: "helmfile.yaml not found in {{ app_dir }}"
+      when: not helmfile_path.stat.exists
+
+
+    - name: Deploy Retail Store using Helmfile
+      ansible.builtin.command:
+        argv:
+          - helmfile
+          - apply
+      args:
+        chdir: "{{ app_dir }}"
+      register: helmfile_apply
+      changed_when: true
+
+    - name: Show Helmfile deployment output
+      ansible.builtin.debug:
+        var: helmfile_apply.stdout_lines
+
+
+    - name: Get deployed pods
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - get
+          - pods
+          - -n
+          - "{{ namespace }}"
+          - -o
+          - wide
+      register: pods
+      changed_when: false
+
+    - name: Show deployed pods
+      ansible.builtin.debug:
+        var: pods.stdout_lines
+
+
+    - name: Wait for application pods
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - wait
+          - --for=condition=Ready
+          - pod
+          - --all
+          - -n
+          - "{{ namespace }}"
+          - --timeout=600s
+      register: pod_wait
+      changed_when: false
+
+
+    - name: Get Kubernetes services
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - get
+          - svc
+          - -n
+          - "{{ namespace }}"
+          - -o
+          - wide
+      register: services
+      changed_when: false
+
+    - name: Show Kubernetes services
+      ansible.builtin.debug:
+        var: services.stdout_lines
+
+
+    - name: Wait for application LoadBalancer URL
+      ansible.builtin.shell: |
+        set -o pipefail
+
+        for attempt in $(seq 1 60); do
+
+          HOSTNAME=$(kubectl get svc \
+            -n "{{ namespace }}" \
+            -o jsonpath='{range .items[?(@.spec.type=="LoadBalancer")]}{.status.loadBalancer.ingress[0].hostname}{"\n"}{end}' \
+            | head -1)
+
+          if [ -n "$HOSTNAME" ]; then
+            echo "$HOSTNAME"
+            exit 0
+          fi
+
+          IP=$(kubectl get svc \
+            -n "{{ namespace }}" \
+            -o jsonpath='{range .items[?(@.spec.type=="LoadBalancer")]}{.status.loadBalancer.ingress[0].ip}{"\n"}{end}' \
+            | head -1)
+
+          if [ -n "$IP" ]; then
+            echo "$IP"
+            exit 0
+          fi
+
+          echo "Waiting for LoadBalancer address..." >&2
+          sleep 10
+
+        done
+
+        echo "No LoadBalancer address assigned within timeout" >&2
+        exit 1
+      args:
+        executable: /bin/bash
+      register: application_lb
+      changed_when: false
+
+
+    - name: Display Retail Store application URL
+      ansible.builtin.debug:
+        msg: "Application URL: http://{{ application_lb.stdout }}"

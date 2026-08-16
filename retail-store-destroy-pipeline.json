@@ -1,0 +1,47 @@
+{
+  "name": "Retail Store EKS Destroy",
+  "description": "Safely destroy the Retail Store EKS infrastructure through OpenSible with manual approval",
+  "git_repo": "https://github.com/Honeyshah624/retail-store-opensible.git",
+  "git_branch": "main",
+  "trigger_config": {
+    "type": "manual"
+  },
+  "stages": [
+    {
+      "name": "OpenTofu Init",
+      "steps": [
+        {
+          "name": "OpenTofu Init",
+          "type": "tofu",
+          "config": {
+            "stack": "retail-store-eks",
+            "action": "init"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Manual Destroy Approval",
+      "steps": [
+        {
+          "name": "Approve EKS Infrastructure Destruction",
+          "type": "approval",
+          "config": {}
+        }
+      ]
+    },
+    {
+      "name": "OpenTofu Destroy",
+      "steps": [
+        {
+          "name": "Destroy EKS Infrastructure",
+          "type": "tofu",
+          "config": {
+            "stack": "retail-store-eks",
+            "action": "destroy"
+          }
+        }
+      ]
+    }
+  ]
+}

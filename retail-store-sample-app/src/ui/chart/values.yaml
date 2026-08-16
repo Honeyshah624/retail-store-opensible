@@ -1,0 +1,130 @@
+# Default values for ui.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+
+image:
+  repository: public.ecr.aws/aws-containers/retail-store-sample-ui
+  pullPolicy: IfNotPresent
+  tag: ""
+
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext:
+  fsGroup: 1000
+
+securityContext:
+  capabilities:
+    drop:
+      - ALL
+    add:
+      - NET_BIND_SERVICE
+
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+
+service:
+  type: LoadBalancer
+  port: 80
+
+  loadBalancerSourceRanges:
+    - 182.76.141.104/29
+    - 115.112.142.32/29
+    - 14.97.73.248/29
+
+  # annotations: {}
+
+  # Optional:
+  # loadBalancerClass: ""
+
+  # Used only for NodePort
+  # nodePort: 30000
+
+resources:
+  limits:
+    memory: 512Mi
+
+  requests:
+    cpu: 128m
+    memory: 512Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 50
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+topologySpreadConstraints: []
+
+metrics:
+  enabled: true
+
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/actuator/prometheus"
+
+configMap:
+  create: true
+  name: ""
+
+app:
+  theme: default
+
+  endpoints: {}
+
+  search:
+    enabled: false
+
+  chat:
+    enabled: false
+    provider: ""
+    model: ""
+
+    bedrock:
+      region: ""
+
+    openai:
+      baseUrl: ""
+
+ingress:
+  enabled: false
+
+  annotations: {}
+
+  tls: []
+
+  hosts: []
+
+ingresses: []
+
+istio:
+  enabled: false
+  hosts: []
+
+opentelemetry:
+  enabled: false
+  instrumentation: ""
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 2
+  maxUnavailable: 1

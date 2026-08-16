@@ -1,0 +1,233 @@
+# ============================================================
+# OpenSible Project - .gitignore
+# ============================================================
+
+
+# ------------------------------------------------------------
+# OS / Editor files
+# ------------------------------------------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+
+# ------------------------------------------------------------
+# Environment / Secrets
+# ------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+*.pem
+*.key
+*.p12
+*.pfx
+
+ssh-keys/
+secrets/
+
+
+# ------------------------------------------------------------
+# AWS credentials
+# ------------------------------------------------------------
+.aws/
+credentials
+.aws/credentials
+
+
+# ------------------------------------------------------------
+# Kubernetes
+# ------------------------------------------------------------
+.kube/
+kubeconfig
+kubeconfig.*
+*.kubeconfig
+
+
+# ------------------------------------------------------------
+# OpenTofu / Terraform
+# ------------------------------------------------------------
+**/.terraform/
+**/.terraform.lock.hcl
+
+**/*.tfstate
+**/*.tfstate.*
+**/terraform.tfstate
+**/terraform.tfstate.backup
+**/terraform.tfstate.json
+
+**/tfplan
+**/tfplan.*
+**/*.tfplan
+
+**/credentials.auto.tfvars
+**/*.auto.tfvars
+
+# Keep examples
+!**/*.auto.tfvars.example
+!**/credentials.auto.tfvars.example
+
+crash.log
+crash.*.log
+
+
+# ------------------------------------------------------------
+# OpenSible Runtime / Generated Data
+# ------------------------------------------------------------
+data/
+runtime/
+history/
+
+**/runtime/
+**/history/
+**/history/logs/
+**/history/executions/
+**/runtime/artifacts/
+**/runtime/generated_playbooks/
+**/runtime/inventory_snapshots/
+
+
+# ------------------------------------------------------------
+# OpenSible persistent project/runtime data
+# ------------------------------------------------------------
+server/data/
+server/runtime/
+
+.sync_state.json
+
+
+# ------------------------------------------------------------
+# Python
+# ------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+.venv/
+venv/
+env/
+
+
+# ------------------------------------------------------------
+# Frontend / Node / Vite
+# ------------------------------------------------------------
+node_modules/
+console/node_modules/
+
+console/dist/
+dist/
+
+.vite/
+*.tsbuildinfo
+
+
+# ------------------------------------------------------------
+# Logs
+# ------------------------------------------------------------
+*.log
+logs/
+
+
+# ------------------------------------------------------------
+# Temporary files
+# ------------------------------------------------------------
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+
+
+# ------------------------------------------------------------
+# Local backups created during development
+# ------------------------------------------------------------
+*.backup
+*.before-*
+*.bak
+
+server/**/*.backup
+server/**/*.before-*
+
+
+# ------------------------------------------------------------
+# OpenTofu sensitive variable files
+# ------------------------------------------------------------
+terraform.tfvars.local
+*.tfvars.local
+credentials.tfvars
+secrets.tfvars
+
+
+# ------------------------------------------------------------
+# Docker local overrides
+# ------------------------------------------------------------
+docker-compose.override.yml
+compose.override.yml
+
+
+# ------------------------------------------------------------
+# Generated / local pipeline backups
+# ------------------------------------------------------------
+retail-store-pipeline-v2.json.backup
+*.json.backuptfplan
+*.tfplan
+*.tfstate
+*.tfstate.*
+
+# Terraform / OpenTofu generated files
+.terraform/
+**/.terraform/
+tfplan
+*.tfplan
+*.tfstate
+*.tfstate.*
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Terraform / OpenTofu generated files
+.terraform/
+**/.terraform/
+tfplan
+*.tfplan
+*.tfstate
+*.tfstate.*
+
+# Local environment files
+.env
+.env.*
+!.env.example
+.envy
+
+# Terraform / OpenTofu generated files
+.terraform/
+**/.terraform/
+tfplan
+*.tfplan
+*.tfstate
+*.tfstate.*
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+.backup-*
+# Test coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage.out
+
+# Ansible retry files
+*.retry

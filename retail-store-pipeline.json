@@ -1,0 +1,88 @@
+{
+  "name": "Retail Store EKS End-to-End",
+  "git_repo": "https://github.com/Honeyshah624/retail-store-opensible.git",
+  "git_branch": "main",
+  "trigger_config": {
+    "type": "manual"
+  },
+  "stages": [
+    {
+      "name": "OpenTofu Init",
+      "steps": [
+        {
+          "name": "OpenTofu Init",
+          "type": "tofu",
+          "config": {
+            "stack": "retail-store-eks",
+            "action": "init"
+          }
+        }
+      ]
+    },
+    {
+      "name": "OpenTofu Validate",
+      "steps": [
+        {
+          "name": "OpenTofu Validate",
+          "type": "tofu",
+          "config": {
+            "stack": "retail-store-eks",
+            "action": "validate"
+          }
+        }
+      ]
+    },
+    {
+      "name": "OpenTofu Plan",
+      "steps": [
+        {
+          "name": "OpenTofu Plan",
+          "type": "tofu",
+          "config": {
+            "stack": "retail-store-eks",
+            "action": "plan"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Manual Approval",
+      "steps": [
+        {
+          "name": "Approve EKS Infrastructure",
+          "type": "approval",
+          "config": {}
+        }
+      ]
+    },
+    {
+      "name": "OpenTofu Apply",
+      "steps": [
+        {
+          "name": "OpenTofu Apply tfplan",
+          "type": "tofu",
+          "config": {
+            "stack": "retail-store-eks",
+            "action": "apply"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Application Deployment",
+      "steps": [
+        {
+          "name": "Deploy Retail Store",
+          "type": "ansible",
+          "config": {
+            "playbook_path": "ansible/deploy.yml",
+            "inventory_files": [
+              "inventory.yml"
+            ],
+            "stage": "apply"
+          }
+        }
+      ]
+    }
+  ]
+}

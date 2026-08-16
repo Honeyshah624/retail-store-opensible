@@ -1,0 +1,115 @@
+---
+- name: Verify AWS identity
+  ansible.builtin.command:
+    cmd: aws sts get-caller-identity --no-cli-pager
+  register: aws_identity
+  changed_when: false
+
+- name: Display AWS identity
+  ansible.builtin.debug:
+    var: aws_identity.stdout_lines
+
+- name: Update EKS kubeconfig
+  ansible.builtin.command:
+    cmd: >
+      aws eks update-kubeconfig
+      --region ap-south-1
+      --name retail-store-dev-eks
+  changed_when: false
+
+- name: Verify EKS nodes
+  ansible.builtin.command:
+    cmd: kubectl get nodes
+  register: eks_nodes
+  changed_when: false
+
+- name: Display EKS nodes
+  ansible.builtin.debug:
+    var: eks_nodes.stdout_lines
+
+- name: Verify Helm
+  ansible.builtin.command:
+    cmd: helm version
+  changed_when: false
+
+- name: Verify Helmfile
+  ansible.builtin.command:
+    cmd: helmfile --version
+  changed_when: false
+
+- name: Verify Helm Diff plugin
+  ansible.builtin.command:
+    cmd: helm diff version
+  changed_when: false
+
+- name: Verify Retail Store Helmfile exists
+  ansible.builtin.stat:
+    path: /workspace/opensible/retail-store-sample-app/src/app/helmfile.yaml
+  register: retail_helmfile
+
+- name: Fail if Retail Store Helmfile is missing
+  ansible.builtin.fail:
+    msg: "Retail Store helmfile.yaml is missing"
+  when: not retail_helmfile.stat.exists
+
+- name: Deploy Retail Store using Helmfile
+  ansible.builtin.command:
+    cmd: helmfile apply
+    chdir: /workspace/opensible/retail-store-sample-app/src/app
+  register: helmfile_result
+
+- name: Display Helmfile output
+  ansible.builtin.debug:
+    var: helmfile_result.stdout_lines
+
+- name: Wait for Retail Store deployments
+  ansible.builtin.command:
+    cmd: >
+      kubectl wait
+      -n default
+      --for=condition=available
+      deployment
+      --all
+      --timeout=15m
+  changed_when: false
+
+- name: Get Retail Store pods
+  ansible.builtin.command:
+    cmd: kubectl get pods -n default
+  register: retail_pods
+  changed_when: false
+
+- name: Display Retail Store pods
+  ansible.builtin.debug:
+    var: retail_pods.stdout_lines
+
+- name: Get Retail Store services
+  ansible.builtin.command:
+    cmd: kubectl get svc -n default
+  register: retail_services
+  changed_when: false
+
+- name: Display Retail Store services
+  ansible.builtin.debug:
+    var: retail_services.stdout_lines
+
+- name: Wait for UI LoadBalancer hostname
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - get
+      - svc
+      - ui
+      - -n
+      - default
+      - -o
+      - "jsonpath={.status.loadBalancer.ingress[0].hostname}"
+  register: ui_hostname
+  changed_when: false
+  retries: 60
+  delay: 10
+  until: ui_hostname.stdout | trim | length > 0
+
+- name: Display Retail Store application URL
+  ansible.builtin.debug:
+    msg: "Retail Store URL: http://{{ ui_hostname.stdout }}"

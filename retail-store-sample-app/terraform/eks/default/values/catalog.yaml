@@ -1,0 +1,32 @@
+image:
+  repository: ${image_repository}
+  tag: ${image_tag}
+
+%{ if opentelemetry_enabled }
+opentelemetry:
+  enabled: true
+  instrumentation: ${opentelemetry_instrumentation}
+%{ else }
+securityGroups:
+  create: true
+
+  securityGroupIds:
+  - ${security_group_id}
+%{ endif }
+
+app:
+  persistence:
+    provider: mysql
+    endpoint: "${database_endpoint}"
+
+    secret:
+      username: ${database_username}
+      password: ${database_password}
+  search:
+    enabled: ${search_enabled}
+    provider: ${search_provider}
+   %{ if search_enabled }
+    endpoint: ${opensearch_endpoint}
+    password: "${opensearch_password}"
+    username: ${opensearch_username}
+   %{ endif }

@@ -1,0 +1,87 @@
+services:
+
+  # ============================================================
+  # OpenSible Server
+  # ============================================================
+  opensible-server:
+    image: docker.io/ossopensible/opensible-server:latest
+    container_name: opensible-server
+    restart: unless-stopped
+
+    ports:
+      - "5000:5000"
+
+    volumes:
+      - opensible-data:/app/data
+      - ./ssh-keys:/root/.ssh:ro
+      - ./server:/app
+      - ./IaC:/app/IaC:ro
+
+    environment:
+      TZ: Asia/Phnom_Penh
+      FLASK_ENV: production
+      DATA_DIR: /app/data
+
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-${JWT_SECRET}}
+      JWT_SECRET: ${JWT_SECRET:-${JWT_SECRET_KEY}}
+      INTERNAL_CALL_SECRET: ${INTERNAL_CALL_SECRET}
+      GLOBAL_SECRETS_ENCRYPTION_KEY: ${GLOBAL_SECRETS_ENCRYPTION_KEY}
+
+      WORKER_REGISTRATION_SECRET: ${WORKER_REGISTRATION_SECRET:-}
+      ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
+
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8089}
+
+
+  # ============================================================
+  # OpenSible Console
+  # ============================================================
+  opensible-console:
+    image: docker.io/ossopensible/opensible-console:latest
+    container_name: opensible-console
+    restart: unless-stopped
+
+    ports:
+      - "8089:80"
+
+    environment:
+      BACKEND_HOST: opensible-server
+      BACKEND_PORT: "5000"
+
+    volumes:
+      - ./console/dist:/usr/share/nginx/html:ro
+      - ./console/nginx-docker.conf:/etc/nginx/templates/default.conf.template:ro
+
+    depends_on:
+      - opensible-server
+
+
+  # ============================================================
+  # OpenSible Worker
+  # ============================================================
+  opensible-worker:
+    image: opensible-worker-eks:local
+    container_name: opensible-worker
+    restart: unless-stopped
+
+    depends_on:
+      - opensible-server
+
+    environment:
+      TZ: Asia/Phnom_Penh
+      OPENSIBLE_SERVER_URL: http://opensible-server:5000
+      WORKER_REGISTRATION_SECRET: ${WORKER_REGISTRATION_SECRET}
+
+    volumes:
+      - opensible-data:/app/data
+      - ./ssh-keys:/root/.ssh:ro
+      - ~/.aws:/root/.aws:ro
+      - ~/.kube:/root/.kube
+      - ./:/workspace/opensible
+
+
+# ============================================================
+# Persistent Volumes
+# ============================================================
+volumes:
+  opensible-data:
