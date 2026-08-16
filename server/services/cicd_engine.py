@@ -59,6 +59,8 @@ import storage.cicd_store as cicd_store
 
 from services.cloud_provisioning import (
     _create_execution as create_tofu_execution,
+    _stack_dir as cloud_stack_dir,
+    _valid_name as valid_stack_name,
 )
 
 from services.execution_history import (
@@ -305,6 +307,13 @@ def reject_pipeline_run(
         rejected_by or "unknown",
     )
 
+    if ok:
+        _cleanup_run_tfplans(
+            project_id,
+            run,
+            reason="approval rejected",
+        )
+
     return bool(ok)
 
 
@@ -443,6 +452,108 @@ def _generated_playbooks_dir(
     )
 
     return directory
+
+
+def _cleanup_tfplan(
+    project_id: str,
+    stack: str,
+    *,
+    reason: str,
+    log: Optional[TextIO] = None,
+) -> bool:
+    """Best-effort removal of one stack's ephemeral OpenTofu plan.
+
+    Cleanup must never change a pipeline result. Stack names are validated
+    before resolving the path so pipeline configuration cannot escape the
+    project stack directory.
+    """
+
+    if not valid_stack_name(stack):
+        message = (
+            f"Refusing tfplan cleanup for invalid stack name: {stack!r}"
+        )
+        logger.warning(message)
+        if log is not None:
+            log.write(f"[cleanup] {message}\n")
+            log.flush()
+        return False
+
+    plan_path = cloud_stack_dir(project_id, stack) / "tfplan"
+
+    try:
+        if not plan_path.exists() and not plan_path.is_symlink():
+            return True
+
+        if plan_path.is_dir() and not plan_path.is_symlink():
+            raise IsADirectoryError(
+                f"expected a plan file, found directory: {plan_path}"
+            )
+
+        plan_path.unlink()
+        logger.info(
+            "Deleted ephemeral tfplan for project=%s stack=%s reason=%s",
+            project_id,
+            stack,
+            reason,
+        )
+        if log is not None:
+            log.write(
+                f"[cleanup] deleted ephemeral tfplan ({reason})\n"
+            )
+            log.flush()
+        return True
+
+    except Exception as exc:
+        logger.warning(
+            "Failed to delete tfplan for project=%s stack=%s reason=%s: %s",
+            project_id,
+            stack,
+            reason,
+            exc,
+            exc_info=True,
+        )
+        if log is not None:
+            log.write(
+                f"[cleanup] warning: unable to delete tfplan ({reason}): "
+                f"{exc}\n"
+            )
+            log.flush()
+        return False
+
+
+def _cleanup_run_tfplans(
+    project_id: str,
+    run: Dict[str, Any],
+    *,
+    reason: str,
+) -> None:
+    """Remove plans for every stack planned/applied by a pipeline run."""
+
+    stacks = set()
+
+    for step in run.get("steps", []) or []:
+        if str(step.get("step_type") or "").strip().lower() != "tofu":
+            continue
+
+        config = step.get("config") or {}
+        action = str(
+            config.get("action") or config.get("tofu_action") or ""
+        ).strip().lower()
+        if action not in {"plan", "apply"}:
+            continue
+
+        stack = str(
+            config.get("stack") or config.get("stack_name") or ""
+        ).strip()
+        if stack:
+            stacks.add(stack)
+
+    for stack in stacks:
+        _cleanup_tfplan(
+            project_id,
+            stack,
+            reason=reason,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -952,6 +1063,17 @@ def _execute_tofu_step(
 
     log.flush()
 
+    # A failed new plan must never leave an older plan available for approval.
+    if action == "plan":
+        _cleanup_tfplan(
+            project_id,
+            stack,
+            reason="before new plan",
+            log=log,
+        )
+
+    status = "FAILED"
+
     try:
 
         execution_id = create_tofu_execution(
@@ -959,6 +1081,12 @@ def _execute_tofu_step(
             stack,
             action,
             triggered_by="cicd",
+        )
+
+        status = _wait_for_worker_execution(
+            project_id,
+            execution_id,
+            log,
         )
 
     except Exception as exc:
@@ -972,13 +1100,25 @@ def _execute_tofu_step(
             f"OpenTofu execution: {exc}\n"
         )
 
-        return "FAILED"
+        status = "FAILED"
 
-    return _wait_for_worker_execution(
-        project_id,
-        execution_id,
-        log,
-    )
+    finally:
+        if action == "apply":
+            _cleanup_tfplan(
+                project_id,
+                stack,
+                reason=f"apply finished with status {status}",
+                log=log,
+            )
+        elif action == "plan" and status != "SUCCESS":
+            _cleanup_tfplan(
+                project_id,
+                stack,
+                reason=f"plan finished with status {status}",
+                log=log,
+            )
+
+    return status
 
 
 # ---------------------------------------------------------------------------

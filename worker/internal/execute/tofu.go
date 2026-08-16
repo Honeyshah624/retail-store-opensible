@@ -392,12 +392,7 @@ func executeTofuRun(executionID string, execData map[string]any, projectID strin
 			fmt.Sprintf(
 				"[approval] using saved OpenTofu plan: %s (%d bytes)\n",
 				planPath,
-				info.Size(),grep -n -A15 'case "plan"' \
-  worker/internal/execute/tofu.go
-
-grep -n -A20 'case "apply"' \
-  worker/internal/execute/tofu.go
-
+				info.Size(),
 			),
 		)
 	}
