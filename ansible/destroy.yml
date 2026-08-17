@@ -20,11 +20,19 @@
         app_dir={{ app_dir | quote }}
         cleanup_timeout={{ cleanup_timeout_seconds | int }}
         declare -A subnet_ids=()
+        declare -A security_group_ids=()
 
         remember_subnet() {
           local subnet_id="$1"
           if [[ -n "$subnet_id" && "$subnet_id" != "None" ]]; then
             subnet_ids["$subnet_id"]=1
+          fi
+        }
+
+        remember_security_group() {
+          local security_group_id="$1"
+          if [[ -n "$security_group_id" && "$security_group_id" != "None" ]]; then
+            security_group_ids["$security_group_id"]=1
           fi
         }
 
@@ -101,6 +109,16 @@
                 --output text | tr '\t' '\n'
             )
 
+            while IFS= read -r security_group_id; do
+              remember_security_group "$security_group_id"
+            done < <(
+              aws elb describe-load-balancers \
+                --region "$region" \
+                --load-balancer-names "$load_balancer" \
+                --query 'LoadBalancerDescriptions[0].SecurityGroups[]' \
+                --output text | tr '\t' '\n'
+            )
+
             echo "Deleting Kubernetes-owned Classic ELB: $load_balancer"
             aws elb delete-load-balancer \
               --region "$region" \
@@ -137,6 +155,16 @@
                 --output text | tr '\t' '\n'
             )
 
+            while IFS= read -r security_group_id; do
+              remember_security_group "$security_group_id"
+            done < <(
+              aws elbv2 describe-load-balancers \
+                --region "$region" \
+                --load-balancer-arns "$load_balancer_arn" \
+                --query 'LoadBalancers[0].SecurityGroups[]' \
+                --output text | tr '\t' '\n'
+            )
+
             echo "Deleting Kubernetes-owned ALB/NLB: $load_balancer_arn"
             aws elbv2 delete-load-balancer \
               --region "$region" \
@@ -144,34 +172,76 @@
           fi
         done
 
-        if [[ -z "${!subnet_ids[*]}" ]]; then
-          echo "No EKS load-balancer subnets remain to check."
-          exit 0
-        fi
-
-        subnet_filter=$(IFS=,; echo "${!subnet_ids[*]}")
         deadline=$((SECONDS + cleanup_timeout))
 
-        while (( SECONDS < deadline )); do
-          remaining=$(aws ec2 describe-network-interfaces \
+        if [[ -n "${!subnet_ids[*]}" ]]; then
+          subnet_filter=$(IFS=,; echo "${!subnet_ids[*]}")
+
+          while (( SECONDS < deadline )); do
+            remaining=$(aws ec2 describe-network-interfaces \
+              --region "$region" \
+              --filters \
+                "Name=subnet-id,Values=$subnet_filter" \
+                'Name=requester-id,Values=amazon-elb' \
+              --query 'length(NetworkInterfaces)' \
+              --output text)
+
+            if [[ "$remaining" == "0" ]]; then
+              echo "All AWS load-balancer network interfaces have been released."
+              break
+            fi
+
+            echo "Waiting for $remaining AWS load-balancer network interface(s) to be released..."
+            sleep 15
+          done
+
+          if [[ "$remaining" != "0" ]]; then
+            echo "Timed out waiting for AWS load-balancer network interfaces in: $subnet_filter" >&2
+            exit 1
+          fi
+        else
+          echo "No EKS load-balancer subnets remain to check."
+        fi
+
+        # Classic Kubernetes ELB security groups can remain after the ELB and
+        # its ENIs disappear. Limit fallback discovery to k8s-* groups carrying
+        # the cluster ownership tag so EKS and unrelated groups are untouched.
+        while IFS= read -r security_group_id; do
+          remember_security_group "$security_group_id"
+        done < <(
+          aws ec2 describe-security-groups \
             --region "$region" \
             --filters \
-              "Name=subnet-id,Values=$subnet_filter" \
-              'Name=requester-id,Values=amazon-elb' \
-            --query 'length(NetworkInterfaces)' \
-            --output text)
+              'Name=group-name,Values=k8s-*' \
+              "Name=tag:kubernetes.io/cluster/${cluster_name},Values=owned" \
+            --query 'SecurityGroups[].GroupId' \
+            --output text | tr '\t' '\n'
+        )
 
-          if [[ "$remaining" == "0" ]]; then
-            echo "All AWS load-balancer network interfaces have been released."
-            exit 0
-          fi
+        while IFS= read -r security_group_id; do
+          remember_security_group "$security_group_id"
+        done < <(
+          aws ec2 describe-security-groups \
+            --region "$region" \
+            --filters \
+              'Name=group-name,Values=k8s-*' \
+              "Name=tag:elbv2.k8s.aws/cluster,Values=${cluster_name}" \
+            --query 'SecurityGroups[].GroupId' \
+            --output text | tr '\t' '\n'
+        )
 
-          echo "Waiting for $remaining AWS load-balancer network interface(s) to be released..."
-          sleep 15
+        for security_group_id in "${!security_group_ids[@]}"; do
+          echo "Deleting Kubernetes-owned load-balancer security group: $security_group_id"
+          while ! aws ec2 delete-security-group \
+            --region "$region" \
+            --group-id "$security_group_id"; do
+            if (( SECONDS >= deadline )); then
+              echo "Timed out deleting load-balancer security group: $security_group_id" >&2
+              exit 1
+            fi
+            sleep 10
+          done
         done
-
-        echo "Timed out waiting for AWS load-balancer network interfaces in: $subnet_filter" >&2
-        exit 1
       args:
         executable: /bin/bash
       changed_when: true
