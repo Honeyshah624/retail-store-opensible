@@ -2,8 +2,6 @@ aws_region = "ap-south-1"
 
 cluster_name = "retail-store-dev-eks"
 
-vpc_id = "vpc-0ff091a8e9aca2a61"
-
 private_subnet_ids = [
   "subnet-0aea1076970b6da1e",
   "subnet-002a5449d612e42b9"
@@ -12,8 +10,7 @@ private_subnet_ids = [
 allowed_admin_cidrs = [
   "182.76.141.104/29",
   "115.112.142.32/29",
-  "14.97.73.248/29",
-  "14.97.73.251/32"
+  "14.97.73.248/29"
 ]
 
 kubernetes_version = "1.36"
