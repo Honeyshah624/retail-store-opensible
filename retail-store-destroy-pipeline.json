@@ -31,6 +31,22 @@
       ]
     },
     {
+      "name": "Kubernetes Cleanup",
+      "steps": [
+        {
+          "name": "Remove Workloads and AWS Load Balancers",
+          "type": "ansible",
+          "config": {
+            "playbook_path": "ansible/destroy.yml",
+            "inventory_files": [
+              "inventory.yml"
+            ],
+            "stage": "apply"
+          }
+        }
+      ]
+    },
+    {
       "name": "OpenTofu Destroy",
       "steps": [
         {

@@ -1,0 +1,177 @@
+---
+- name: Remove Kubernetes-managed AWS resources before destroying EKS
+  hosts: local
+  connection: local
+  gather_facts: false
+
+  vars:
+    aws_region: ap-south-1
+    eks_cluster_name: retail-store-dev-eks
+    app_dir: /workspace/opensible/retail-store-sample-app/src/app
+    cleanup_timeout_seconds: 900
+
+  tasks:
+    - name: Remove Kubernetes workloads and AWS load balancers
+      ansible.builtin.shell: |
+        set -euo pipefail
+
+        region={{ aws_region | quote }}
+        cluster_name={{ eks_cluster_name | quote }}
+        app_dir={{ app_dir | quote }}
+        cleanup_timeout={{ cleanup_timeout_seconds | int }}
+        declare -A subnet_ids=()
+
+        remember_subnet() {
+          local subnet_id="$1"
+          if [[ -n "$subnet_id" && "$subnet_id" != "None" ]]; then
+            subnet_ids["$subnet_id"]=1
+          fi
+        }
+
+        if aws eks describe-cluster \
+          --region "$region" \
+          --name "$cluster_name" >/dev/null 2>&1; then
+          while IFS= read -r subnet_id; do
+            remember_subnet "$subnet_id"
+          done < <(
+            aws eks describe-cluster \
+              --region "$region" \
+              --name "$cluster_name" \
+              --query 'cluster.resourcesVpcConfig.subnetIds[]' \
+              --output text | tr '\t' '\n'
+          )
+
+          aws eks update-kubeconfig \
+            --region "$region" \
+            --name "$cluster_name"
+
+          # Deleting these API objects while the control plane is available lets
+          # their controllers remove AWS load balancers and finalizers cleanly.
+          mapfile -t load_balancer_services < <(
+            kubectl get services --all-namespaces \
+              -o jsonpath='{range .items[?(@.spec.type=="LoadBalancer")]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}'
+          )
+          for service in "${load_balancer_services[@]}"; do
+            [[ -z "$service" ]] && continue
+            read -r namespace name <<<"$service"
+            kubectl delete service "$name" \
+              --namespace "$namespace" \
+              --ignore-not-found=true \
+              --wait=false
+          done
+
+          kubectl delete ingress \
+            --all \
+            --all-namespaces \
+            --ignore-not-found=true \
+            --wait=false
+
+          if [[ -f "$app_dir/helmfile.yaml" ]]; then
+            (
+              cd "$app_dir"
+              helmfile destroy
+            ) || echo "Helm cleanup was incomplete; continuing with AWS ownership-tag cleanup."
+          fi
+        else
+          echo "EKS cluster $cluster_name is already absent; cleaning orphaned AWS load balancers."
+        fi
+
+        # Recover orphaned Classic ELBs left behind if EKS or its Service was
+        # removed before the Kubernetes load-balancer finalizer completed.
+        for load_balancer in $(
+          aws elb describe-load-balancers \
+            --region "$region" \
+            --query 'LoadBalancerDescriptions[].LoadBalancerName' \
+            --output text
+        ); do
+          ownership=$(aws elb describe-tags \
+            --region "$region" \
+            --load-balancer-names "$load_balancer" \
+            --query "TagDescriptions[0].Tags[?Key=='kubernetes.io/cluster/${cluster_name}'].Value | [0]" \
+            --output text 2>/dev/null || true)
+
+          if [[ "$ownership" == "owned" ]]; then
+            while IFS= read -r subnet_id; do
+              remember_subnet "$subnet_id"
+            done < <(
+              aws elb describe-load-balancers \
+                --region "$region" \
+                --load-balancer-names "$load_balancer" \
+                --query 'LoadBalancerDescriptions[0].Subnets[]' \
+                --output text | tr '\t' '\n'
+            )
+
+            echo "Deleting Kubernetes-owned Classic ELB: $load_balancer"
+            aws elb delete-load-balancer \
+              --region "$region" \
+              --load-balancer-name "$load_balancer" || true
+          fi
+        done
+
+        # Also cover ALBs and NLBs created by the AWS Load Balancer Controller.
+        for load_balancer_arn in $(
+          aws elbv2 describe-load-balancers \
+            --region "$region" \
+            --query 'LoadBalancers[].LoadBalancerArn' \
+            --output text
+        ); do
+          ownership=$(aws elbv2 describe-tags \
+            --region "$region" \
+            --resource-arns "$load_balancer_arn" \
+            --query "TagDescriptions[0].Tags[?Key=='kubernetes.io/cluster/${cluster_name}'].Value | [0]" \
+            --output text 2>/dev/null || true)
+          controller_cluster=$(aws elbv2 describe-tags \
+            --region "$region" \
+            --resource-arns "$load_balancer_arn" \
+            --query "TagDescriptions[0].Tags[?Key=='elbv2.k8s.aws/cluster'].Value | [0]" \
+            --output text 2>/dev/null || true)
+
+          if [[ "$ownership" == "owned" || "$controller_cluster" == "$cluster_name" ]]; then
+            while IFS= read -r subnet_id; do
+              remember_subnet "$subnet_id"
+            done < <(
+              aws elbv2 describe-load-balancers \
+                --region "$region" \
+                --load-balancer-arns "$load_balancer_arn" \
+                --query 'LoadBalancers[0].AvailabilityZones[].SubnetId' \
+                --output text | tr '\t' '\n'
+            )
+
+            echo "Deleting Kubernetes-owned ALB/NLB: $load_balancer_arn"
+            aws elbv2 delete-load-balancer \
+              --region "$region" \
+              --load-balancer-arn "$load_balancer_arn" || true
+          fi
+        done
+
+        if [[ -z "${!subnet_ids[*]}" ]]; then
+          echo "No EKS load-balancer subnets remain to check."
+          exit 0
+        fi
+
+        subnet_filter=$(IFS=,; echo "${!subnet_ids[*]}")
+        deadline=$((SECONDS + cleanup_timeout))
+
+        while (( SECONDS < deadline )); do
+          remaining=$(aws ec2 describe-network-interfaces \
+            --region "$region" \
+            --filters \
+              "Name=subnet-id,Values=$subnet_filter" \
+              'Name=requester-id,Values=amazon-elb' \
+            --query 'length(NetworkInterfaces)' \
+            --output text)
+
+          if [[ "$remaining" == "0" ]]; then
+            echo "All AWS load-balancer network interfaces have been released."
+            exit 0
+          fi
+
+          echo "Waiting for $remaining AWS load-balancer network interface(s) to be released..."
+          sleep 15
+        done
+
+        echo "Timed out waiting for AWS load-balancer network interfaces in: $subnet_filter" >&2
+        exit 1
+      args:
+        executable: /bin/bash
+      changed_when: true
