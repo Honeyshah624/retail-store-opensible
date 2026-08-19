@@ -69,7 +69,7 @@ services:
 
     environment:
       TZ: Asia/Phnom_Penh
-      OPENSIBLE_SERVER_URL: http://opensible-server:5000
+      WORKER_SERVER_URL: http://opensible-server:5000
       WORKER_REGISTRATION_SECRET: ${WORKER_REGISTRATION_SECRET}
 
     volumes:
